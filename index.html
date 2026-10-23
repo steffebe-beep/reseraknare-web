@@ -43,7 +43,7 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 12px 0 4px
 .row { display: flex; gap: 10px; align-items: center; }
 .row > * { flex: 1; }
 nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: #151a20; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
-nav button { flex: 1; background: none; border-radius: 0; color: var(--muted); padding: 14px 4px; font-weight: 600; }
+nav button { flex: 1; background: none; border-radius: 0; color: var(--muted); padding: 14px 2px; font-weight: 600; font-size: 14px; white-space: nowrap; }
 nav button.on { color: var(--text); background: var(--card); }
 .monthbar { display: flex; align-items: center; gap: 8px; }
 .monthbar button { padding: 8px 14px; }
@@ -112,6 +112,27 @@ td.n, th.n { text-align: right; }
   </section>
 
   <!-- Bilar -->
+  <!-- Export -->
+  <section id="tab-exp" class="hide">
+    <div class="card">
+      <label for="xType">Vad</label>
+      <select id="xType">
+        <option value="skv">Körjournal för Skatteverket</option>
+        <option value="cust">Underlag till kund (fakturering)</option>
+      </select>
+      <div id="xCustBox" class="hide"><label for="xCust">Kund</label><select id="xCust"></select></div>
+      <label for="xPeriod">Period</label>
+      <select id="xPeriod"></select>
+      <div id="xRange" class="row hide" style="margin-top:8px">
+        <div><label for="xFrom">Från</label><input id="xFrom" type="date"></div>
+        <div><label for="xTo">Till och med</label><input id="xTo" type="date"></div>
+      </div>
+      <div id="xWarn" class="small" style="margin-top:12px"></div>
+      <div style="margin-top:14px"><button id="xGo">Ladda ner Excel</button></div>
+      <p id="xMsg" class="small"></p>
+    </div>
+  </section>
+
   <section id="tab-cars" class="hide">
     <div id="cars"></div>
   </section>
@@ -121,6 +142,7 @@ td.n, th.n { text-align: right; }
   <button data-tab="trips" class="on">Resor</button>
   <button data-tab="sum">Per kund</button>
   <button data-tab="cust">Kunder</button>
+  <button data-tab="exp" id="navExp">Export</button>
   <button data-tab="cars" id="navCars">Bilar</button>
 </nav>
 
@@ -145,6 +167,7 @@ td.n, th.n { text-align: right; }
 </dialog>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const SUPABASE_URL = "https://zwfnojbxaamgavtzztmk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_AO4GxNdJeqXqwKlw8BOaSQ_A7kNqpeQ";   // publik nyckel – får synas, reglerna i databasen skyddar datan
@@ -197,7 +220,7 @@ async function start(user) {
   $("who").textContent = (mem[0].companies?.name || "") + " · " + (mem[0].name || user.email) + " · " + roleName;
   show("nav", true);
   if (role !== "consultant") show("navCars", false);
-  if (role === "office") { document.querySelector('[data-tab="trips"]').classList.add("hide"); document.querySelector('[data-tab="cust"]').classList.add("hide"); tab("sum"); }
+  if (role === "office") { ["trips", "cust", "exp"].forEach((x) => document.querySelector(`[data-tab="${x}"]`).classList.add("hide")); tab("sum"); }
   else tab("trips");
   await loadCusts();
   if (role !== "office") loadTrips();
@@ -207,7 +230,8 @@ async function start(user) {
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => tab(b.dataset.tab));
 function tab(t) {
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
-  ["trips", "sum", "cust", "cars"].forEach((x) => show("tab-" + x, x === t));
+  ["trips", "sum", "cust", "exp", "cars"].forEach((x) => show("tab-" + x, x === t));
+  if (t === "exp") initExport();
   if (t === "sum") loadSum();
   if (t === "cust") renderCusts();
   if (t === "cars") loadCars();
@@ -351,6 +375,106 @@ async function loadSum() {
     data.map((r) => { tk += +r.km; tm += +r.drive_minutes; tn += +r.trips;
       return `<tr><td>${esc(r.customer)}</td><td>${esc(r.project)}</td><td class="n">${r.trips}</td><td class="n">${km(r.km)}</td><td class="n">${dur(r.drive_minutes * 60)}</td></tr>`; }).join("") +
     `<tr><th>Totalt</th><th></th><th class="n">${tn}</th><th class="n">${km(tk)}</th><th class="n">${dur(tm * 60)}</th></tr>`;
+}
+
+// ------------------------------------------------------------------ export (Excel)
+let expInit = false;
+function initExport() {
+  $("xCust").innerHTML = custs.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  if (expInit) { checkExport(); return; }
+  expInit = true;
+  const now = new Date(), opts = [];
+  for (let i = 0; i < 13; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    opts.push(`<option value="m:${d.getFullYear()}-${d.getMonth()}">${MONTHS[d.getMonth()].replace(/^./, (c) => c.toUpperCase())} ${d.getFullYear()}</option>`);
+  }
+  opts.push(`<option value="y:${now.getFullYear()}">Hela ${now.getFullYear()}</option>`, `<option value="y:${now.getFullYear() - 1}">Hela ${now.getFullYear() - 1}</option>`, `<option value="r">Eget intervall …</option>`);
+  $("xPeriod").innerHTML = opts.join("");
+  $("xPeriod").selectedIndex = now.getDate() <= 10 ? 1 : 0;   // tidigt i månaden: förra månaden är den som ska ut
+  ["xType", "xPeriod", "xCust", "xFrom", "xTo"].forEach((id) => $(id).onchange = checkExport);
+  $("xGo").onclick = doExport;
+  checkExport();
+}
+function expRange() {
+  const v = $("xPeriod").value;
+  if (v.startsWith("m:")) { const [y, m] = v.slice(2).split("-").map(Number); return [new Date(y, m, 1), new Date(y, m + 1, 1), MONTHS[m] + " " + y]; }
+  if (v.startsWith("y:")) { const y = +v.slice(2); return [new Date(y, 0, 1), new Date(y + 1, 0, 1), String(y)]; }
+  const f = $("xFrom").value, t = $("xTo").value;
+  if (!f || !t) return null;
+  const a = new Date(f + "T00:00"), b = new Date(t + "T00:00"); b.setDate(b.getDate() + 1);
+  return [a, b, f + "–" + t];
+}
+async function expTrips() {
+  const r = expRange();
+  if (!r) return null;
+  let q = sb.from("trips").select("*").eq("company_id", company).gte("started_at", r[0].toISOString()).lt("started_at", r[1].toISOString()).order("started_at");
+  if ($("xType").value === "cust") q = q.eq("kind", "customer").eq("customer_id", $("xCust").value);
+  const { data, error } = await q;
+  if (error) throw error;
+  return { trips: data || [], label: r[2] };
+}
+async function checkExport() {
+  show("xCustBox", $("xType").value === "cust");
+  show("xRange", $("xPeriod").value === "r");
+  $("xMsg").textContent = "";
+  try {
+    const x = await expTrips();
+    if (!x) { $("xWarn").textContent = "Välj från- och till-datum."; return; }
+    const open = x.trips.filter((t) => !t.confirmed).length;
+    const noPurp = x.trips.filter((t) => t.kind !== "private" && !t.purpose).length;
+    const parts = [`${x.trips.length} ${x.trips.length === 1 ? "resa" : "resor"} i perioden.`];
+    if (open) parts.push(`<span style="color:var(--amber)">⚠ ${open} ${open === 1 ? "resa är inte bekräftad" : "resor är inte bekräftade"}.</span>`);
+    if (noPurp) parts.push(`<span style="color:var(--amber)">⚠ ${noPurp} ${noPurp === 1 ? "tjänsteresa saknar" : "tjänsteresor saknar"} syfte – Skatteverket kräver det.</span>`);
+    $("xWarn").innerHTML = parts.join(" ");
+  } catch (e) { $("xWarn").textContent = e.message; }
+}
+const dstr = (iso) => iso ? new Date(iso).toLocaleDateString("sv-SE") : "";
+const kmn = (v) => Math.round((Number(v) || 0) * 10) / 10;
+async function doExport() {
+  if (typeof XLSX === "undefined") { $("xMsg").textContent = "Excel-delen laddades inte – ladda om sidan."; return; }
+  $("xGo").disabled = true;
+  try {
+    const x = await expTrips();
+    if (!x) return;
+    const { data: cars } = await sb.from("cars").select("id, reg").eq("company_id", company);
+    const reg = (id) => (cars || []).find((c) => c.id === id)?.reg || "";
+    const cname = (id) => custs.find((c) => c.id === id)?.name || "";
+    const pname = (id) => projs.find((p) => p.id === id)?.name || "";
+    const company_ = $("who").textContent.split(" · ")[0];
+    let rows, name;
+    if ($("xType").value === "skv") {
+      rows = [["Körjournal – " + company_ + " – " + x.label], [],
+        ["Bil", "Startdatum", "Starttid", "Slutdatum", "Sluttid", "Km", "Startadress", "Slutadress", "Ärende", "Syfte", "Besökt företag/kontakt", "Mätare start", "Mätare slut", "Status"]];
+      let w = 0, p = 0;
+      for (const t of x.trips) {
+        const errand = t.kind === "private" ? "Privat" : t.kind === "internal" ? "Tjänsteresa (internt)" : "Tjänsteresa – " + (cname(t.customer_id) || "kund saknas");
+        rows.push([reg(t.car_id), dstr(t.started_at), hm(t.started_at), dstr(t.ended_at), hm(t.ended_at), kmn(t.km), t.from_name, t.to_name, errand,
+          t.kind === "private" ? "" : t.purpose, t.visited, t.odo_start ?? "", t.odo_end ?? "", t.confirmed ? "Bekräftad" : "Ej bekräftad"]);
+        t.kind === "private" ? (p += +t.km) : (w += +t.km);
+      }
+      rows.push([], ["", "", "", "", "Tjänsteresor", kmn(w)], ["", "", "", "", "Privata resor", kmn(p)], ["", "", "", "", "Totalt", kmn(w + p)]);
+      name = `Korjournal ${x.label}.xlsx`;
+    } else {
+      const cn = cname($("xCust").value);
+      rows = [["Underlag – " + cn + " – " + x.label], [],
+        ["Datum", "Start", "Slut", "Km", "Körtid (min)", "Projekt", "AO", "Syfte", "Från", "Till"]];
+      let k = 0, m = 0;
+      for (const t of x.trips) {
+        const mins = t.started_at && t.ended_at ? Math.round((new Date(t.ended_at) - new Date(t.started_at)) / 60000) : 0;
+        rows.push([dstr(t.started_at), hm(t.started_at), hm(t.ended_at), kmn(t.km), mins, pname(t.project_id), t.ao, t.purpose, t.from_name, t.to_name]);
+        k += +t.km; m += mins;
+      }
+      rows.push([], ["Totalt", "", "", kmn(k), m]);
+      name = `Underlag ${cn} ${x.label}.xlsx`;
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = rows[2].map((h, i) => ({ wch: Math.min(40, Math.max(String(h).length + 2, ...rows.slice(3).map((r) => String(r[i] ?? "").length + 1))) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Resor");
+    XLSX.writeFile(wb, name.replace(/[\\/:*?"<>|]/g, "-"));
+    $("xMsg").className = "small ok"; $("xMsg").textContent = "Klart – filen har laddats ner.";
+  } catch (e) { $("xMsg").className = "small err"; $("xMsg").textContent = e.message; }
+  finally { $("xGo").disabled = false; }
 }
 
 // ------------------------------------------------------------------ bilar (konsulten)

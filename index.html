@@ -173,7 +173,10 @@ $("send").onclick = async () => {
   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: SITE } });
   $("send").disabled = false;
   $("loginMsg").className = "small " + (error ? "err" : "ok");
-  $("loginMsg").textContent = error ? "Gick inte: " + error.message : "Kolla mejlen – tryck på länken. Den gäller en timme.";
+  const rate = error && /rate limit/i.test(error.message);
+  $("loginMsg").textContent = !error ? "Kolla mejlen – tryck på länken. Den gäller en timme."
+    : rate ? "För många inloggningsmejl just nu – vänta en stund och försök igen."
+    : "Gick inte: " + error.message;
 };
 $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
 
@@ -367,8 +370,13 @@ async function loadCars() {
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     const box = $("k-" + b.dataset.key);
     if (!r.ok) { box.innerHTML = `<p class="err">${esc(r.error)}</p>`; b.disabled = false; return; }
-    box.innerHTML = `<p class="small">Skriv in de här i appen under <b>Inställningar → Skärmen i bilen → Molnet</b>. Nyckeln visas bara nu.</p>
-      <label>Bil-id</label><div class="key">${esc(b.dataset.key)}</div><label>Nyckel</label><div class="key">${esc(r.key)}</div>`;
+    box.innerHTML = `<p class="small">Klistra in de här i appen under <b>Inställningar → Skärmen i bilen → Molnet</b>. Nyckeln visas bara nu.</p>
+      <label>Bil-id</label><div class="key">${esc(b.dataset.key)}</div><button class="ghost" data-copy="${esc(b.dataset.key)}">Kopiera bil-id</button>
+      <label>Nyckel</label><div class="key">${esc(r.key)}</div><button class="ghost" data-copy="${esc(r.key)}">Kopiera nyckel</button>`;
+    box.querySelectorAll("[data-copy]").forEach((c) => c.onclick = async () => {
+      try { await navigator.clipboard.writeText(c.dataset.copy); c.textContent = "Kopierat ✓"; }
+      catch { c.textContent = "Håll fingret på texten ovanför och kopiera"; }
+    });
     b.classList.add("hide");
   });
 }

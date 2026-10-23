@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reseräknare</title>
+<meta name="theme-color" content="#0f141a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Reseräknare">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+:root {
+  --bg: #0f141a; --card: #1b2129; --card2: #252c35; --text: #e8edf2; --muted: #8b96a3; --line: #2a313a;
+  --blue: #378add; --green: #4caf50; --purple: #8e6bd6; --amber: #e0a030; --red: #e05050;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { padding: env(safe-area-inset-top) max(14px, env(safe-area-inset-right)) calc(80px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
+main { max-width: 760px; margin: 0 auto; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 18px 2px 8px; }
+h1 { font-size: 26px; margin: 0; }
+.sub { color: var(--muted); font-size: 14px; }
+.card { background: var(--card); border-radius: 14px; padding: 14px 16px; margin: 10px 0; }
+.trip { display: flex; gap: 10px; background: var(--card); border-radius: 14px; overflow: hidden; margin: 8px 0; cursor: pointer; }
+.trip .bar { width: 5px; flex: none; }
+.trip .mid { flex: 1; min-width: 0; padding: 10px 4px 10px 8px; }
+.trip .right { text-align: right; padding: 10px 14px 10px 0; white-space: nowrap; }
+.trip .h { font-weight: 700; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trip .l { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muted { color: var(--muted); }
+.km { font-weight: 700; font-size: 16px; }
+.small { font-size: 13px; }
+.pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #3a2c10; color: var(--amber); margin-top: 4px; }
+.day { color: var(--muted); font-weight: 600; margin: 18px 4px 4px; }
+button, .btn { font: inherit; border: 0; border-radius: 12px; padding: 12px 16px; background: var(--blue); color: #fff; font-weight: 600; cursor: pointer; }
+button.ghost { background: var(--card2); color: var(--text); }
+button:disabled { opacity: .5; }
+input, select, textarea { font: inherit; width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card2); color: var(--text); }
+label { display: block; color: var(--muted); font-size: 13px; margin: 12px 0 4px; }
+.row { display: flex; gap: 10px; align-items: center; }
+.row > * { flex: 1; }
+nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: #151a20; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
+nav button { flex: 1; background: none; border-radius: 0; color: var(--muted); padding: 14px 4px; font-weight: 600; }
+nav button.on { color: var(--text); background: var(--card); }
+.monthbar { display: flex; align-items: center; gap: 8px; }
+.monthbar button { padding: 8px 14px; }
+.monthbar .t { flex: 1; text-align: center; }
+dialog { background: var(--card); color: var(--text); border: 0; border-radius: 16px; width: min(560px, 94vw); padding: 18px; }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+td, th { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+th { color: var(--muted); font-size: 13px; font-weight: 600; }
+td.n, th.n { text-align: right; }
+.err { color: var(--red); }
+.ok { color: var(--green); }
+.hide { display: none !important; }
+.key { font-family: ui-monospace, monospace; word-break: break-all; background: var(--card2); padding: 10px; border-radius: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>Reseräknare</h1><div class="sub" id="who"></div></div>
+    <button class="ghost hide" id="logout" style="white-space:nowrap;padding:8px 12px;font-size:14px">Logga ut</button>
+  </header>
+
+  <!-- Inloggning -->
+  <section id="login" class="hide">
+    <div class="card">
+      <p>Logga in med din e-postadress. Du får en länk i mejlet – tryck på den så är du inne.</p>
+      <label for="email">E-post</label>
+      <input id="email" type="email" autocomplete="email" placeholder="namn@foretag.se">
+      <div style="margin-top:14px"><button id="send">Skicka inloggningslänk</button></div>
+      <p id="loginMsg" class="small"></p>
+    </div>
+  </section>
+
+  <section id="noaccess" class="hide">
+    <div class="card">Du är inloggad men inte kopplad till något företag än. Be konsulten bjuda in din e-postadress.</div>
+  </section>
+
+  <!-- Resor -->
+  <section id="tab-trips" class="hide">
+    <div class="monthbar">
+      <button class="ghost" id="prev">‹</button>
+      <div class="t"><div id="month" style="font-weight:700;font-size:18px"></div><div id="sum" class="sub"></div></div>
+      <button class="ghost" id="next">›</button>
+    </div>
+    <div id="trips"></div>
+  </section>
+
+  <!-- Per kund -->
+  <section id="tab-sum" class="hide">
+    <div class="monthbar">
+      <button class="ghost" id="sprev">‹</button>
+      <div class="t" id="smonth" style="font-weight:700;font-size:18px"></div>
+      <button class="ghost" id="snext">›</button>
+    </div>
+    <div class="card"><table id="sumtable"></table></div>
+    <div class="card small muted">Bara kundresor. Körtid räknas från start till framme för varje resa.</div>
+  </section>
+
+  <!-- Kunder -->
+  <section id="tab-cust" class="hide">
+    <div class="card">
+      <div class="row"><input id="newCust" placeholder="Ny kund"><button id="addCust" style="flex:none">Lägg till</button></div>
+    </div>
+    <div id="custs"></div>
+  </section>
+
+  <!-- Bilar -->
+  <section id="tab-cars" class="hide">
+    <div id="cars"></div>
+  </section>
+</main>
+
+<nav id="nav" class="hide">
+  <button data-tab="trips" class="on">Resor</button>
+  <button data-tab="sum">Per kund</button>
+  <button data-tab="cust">Kunder</button>
+  <button data-tab="cars" id="navCars">Bilar</button>
+</nav>
+
+<dialog id="edit">
+  <h3 id="eTitle" style="margin:0 0 4px"></h3>
+  <div id="eFacts" class="small muted"></div>
+  <label>Typ</label>
+  <select id="eKind"><option value="customer">Kund</option><option value="internal">Internt</option><option value="private">Privat</option></select>
+  <div id="eCustBox">
+    <label>Kund</label><select id="eCust"></select>
+    <label>Projekt</label><select id="eProj"></select>
+    <label>AO (arbetsorder)</label><input id="eAo">
+  </div>
+  <div id="ePurpBox">
+    <label>Syfte</label><input id="ePurpose" placeholder="Krävs för tjänsteresor">
+    <label>Besökt företag / kontakt</label><input id="eVisited">
+  </div>
+  <label class="row" style="color:var(--text);margin-top:14px"><input type="checkbox" id="eOk" style="width:auto;flex:none"> Bekräftad</label>
+  <p class="small muted">Km, tider, mätarställning och platser kommer från bilen och kan inte ändras.</p>
+  <p id="eErr" class="err small"></p>
+  <div class="row" style="margin-top:10px"><button class="ghost" id="eCancel">Avbryt</button><button id="eSave">Spara</button></div>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const SUPABASE_URL = "https://zwfnojbxaamgavtzztmk.supabase.co";
+const SUPABASE_KEY = "sb_publishable_AO4GxNdJeqXqwKlw8BOaSQ_A7kNqpeQ";   // publik nyckel – får synas, reglerna i databasen skyddar datan
+const SITE = location.origin + location.pathname;
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+const MONTHS = ["januari","februari","mars","april","maj","juni","juli","augusti","september","oktober","november","december"];
+const COLORS = { customer: "var(--blue)", internal: "var(--purple)", private: "var(--green)" };
+
+let me = null, company = null, role = null, custs = [], projs = [], trips = [], editing = null;
+let ym = new Date(); ym = new Date(ym.getFullYear(), ym.getMonth(), 1);
+let sym = new Date(ym);
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const km = (v) => (Number(v) || 0).toFixed(1).replace(".", ",");
+const hm = (iso) => iso ? new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : "--:--";
+const dur = (sec) => { const m = Math.round(sec / 60); return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0") + " min"; };
+const dayName = (iso) => new Date(iso).toLocaleDateString("sv-SE", { weekday: "short", day: "numeric", month: "short" });
+function show(id, on) { $(id).classList.toggle("hide", !on); }
+
+// ------------------------------------------------------------------ inloggning
+$("send").onclick = async () => {
+  const email = $("email").value.trim();
+  if (!email) return;
+  $("send").disabled = true;
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: SITE } });
+  $("send").disabled = false;
+  $("loginMsg").className = "small " + (error ? "err" : "ok");
+  $("loginMsg").textContent = error ? "Gick inte: " + error.message : "Kolla mejlen – tryck på länken. Den gäller en timme.";
+};
+$("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+sb.auth.onAuthStateChange((_e, session) => { if (session && !me) start(session.user); });
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) start(data.session.user); else { show("login", true); }
+})();
+
+async function start(user) {
+  me = user;
+  show("login", false);
+  show("logout", true);
+  const { data: mem } = await sb.from("members").select("company_id, role, name, companies(name)").eq("user_id", user.id);
+  if (!mem || !mem.length) { $("who").textContent = user.email; show("noaccess", true); return; }
+  company = mem[0].company_id; role = mem[0].role;
+  const roleName = { driver: "Förare", consultant: "Konsult", office: "Kontor" }[role];
+  $("who").textContent = (mem[0].companies?.name || "") + " · " + (mem[0].name || user.email) + " · " + roleName;
+  show("nav", true);
+  if (role !== "consultant") show("navCars", false);
+  if (role === "office") { document.querySelector('[data-tab="trips"]').classList.add("hide"); document.querySelector('[data-tab="cust"]').classList.add("hide"); tab("sum"); }
+  else tab("trips");
+  await loadCusts();
+  if (role !== "office") loadTrips();
+}
+
+// ------------------------------------------------------------------ flikar
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => tab(b.dataset.tab));
+function tab(t) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
+  ["trips", "sum", "cust", "cars"].forEach((x) => show("tab-" + x, x === t));
+  if (t === "sum") loadSum();
+  if (t === "cust") renderCusts();
+  if (t === "cars") loadCars();
+}
+
+// ------------------------------------------------------------------ kunder och projekt
+async function loadCusts() {
+  const [c, p] = await Promise.all([
+    sb.from("customers").select("id, name, number").eq("company_id", company).eq("deleted", false).order("name"),
+    sb.from("projects").select("id, customer_id, name, closed").eq("company_id", company).order("name"),
+  ]);
+  custs = c.data || []; projs = p.data || [];
+}
+function renderCusts() {
+  const box = $("custs");
+  if (!custs.length) { box.innerHTML = '<div class="card muted">Inga kunder än. De kommer också automatiskt från bilen.</div>'; return; }
+  box.innerHTML = custs.map((c) => {
+    const ps = projs.filter((p) => p.customer_id === c.id && !p.closed);
+    return `<div class="card"><div style="font-weight:700">${esc(c.name)}</div>
+      ${ps.length ? `<div class="small muted">Projekt: ${ps.map((p) => esc(p.name)).join(", ")}</div>` : ""}
+      <div class="row" style="margin-top:8px"><input placeholder="Nytt projekt" data-proj="${c.id}"><button class="ghost" style="flex:none" data-addproj="${c.id}">Lägg till</button></div></div>`;
+  }).join("");
+  box.querySelectorAll("[data-addproj]").forEach((b) => b.onclick = async () => {
+    const cid = b.dataset.addproj, inp = box.querySelector(`[data-proj="${cid}"]`), name = inp.value.trim();
+    if (!name) return;
+    await sb.from("projects").insert({ company_id: company, customer_id: cid, name });
+    await loadCusts(); renderCusts();
+  });
+}
+$("addCust").onclick = async () => {
+  const name = $("newCust").value.trim();
+  if (!name) return;
+  const { error } = await sb.from("customers").insert({ company_id: company, name });
+  if (error) { alertMsg(error.message); return; }
+  $("newCust").value = "";
+  await loadCusts(); renderCusts();
+};
+function alertMsg(m) { const d = document.createElement("div"); d.className = "card err"; d.textContent = m; document.querySelector("main").prepend(d); setTimeout(() => d.remove(), 5000); }
+
+// ------------------------------------------------------------------ resor
+$("prev").onclick = () => { ym = new Date(ym.getFullYear(), ym.getMonth() - 1, 1); loadTrips(); };
+$("next").onclick = () => { ym = new Date(ym.getFullYear(), ym.getMonth() + 1, 1); loadTrips(); };
+
+async function loadTrips() {
+  $("month").textContent = MONTHS[ym.getMonth()].replace(/^./, (c) => c.toUpperCase()) + " " + ym.getFullYear();
+  const from = ym.toISOString(), to = new Date(ym.getFullYear(), ym.getMonth() + 1, 1).toISOString();
+  let q = sb.from("trips").select("*").eq("company_id", company).gte("started_at", from).lt("started_at", to).order("started_at", { ascending: false });
+  const { data, error } = await q;
+  if (error) { $("trips").innerHTML = `<div class="card err">${esc(error.message)}</div>`; return; }
+  trips = data || [];
+  let w = 0, p = 0;
+  trips.forEach((t) => (t.kind === "private" ? (p += +t.km) : (w += +t.km)));
+  $("sum").textContent = `Företag ${km(w)} km · Privat ${km(p)} km`;
+  renderTrips();
+}
+
+function renderTrips() {
+  if (!trips.length) { $("trips").innerHTML = '<div class="card muted">Inga resor den här månaden.</div>'; return; }
+  let html = "", lastDay = "";
+  for (const t of trips) {
+    const d = dayName(t.started_at);
+    if (d !== lastDay) { html += `<div class="day">${esc(d)}</div>`; lastDay = d; }
+    const c = custs.find((x) => x.id === t.customer_id), pr = projs.find((x) => x.id === t.project_id);
+    const head = t.kind === "private" ? "Privat" : t.kind === "internal" ? (t.purpose || "Internt") : (c ? c.name : "Kund saknas");
+    const lines = [];
+    if (t.kind === "customer") {
+      if (pr) lines.push("Projekt: " + esc(pr.name));
+      if (t.ao) lines.push("AO: " + esc(t.ao));
+      if (t.purpose) lines.push("Syfte: " + esc(t.purpose));
+    }
+    if (t.kind !== "private" && !t.purpose) lines.push('<span style="color:var(--amber)">⚠ Syfte saknas</span>');
+    lines.push(`<span class="muted">${esc(t.from_name || "Okänd plats")} → ${esc(t.to_name || "Okänd plats")}</span>`);
+    const secs = t.started_at && t.ended_at ? (new Date(t.ended_at) - new Date(t.started_at)) / 1000 : 0;
+    html += `<div class="trip" data-id="${t.id}"><div class="bar" style="background:${COLORS[t.kind]}"></div>
+      <div class="mid"><div class="h">${esc(head)}</div>${lines.map((l) => `<div class="l">${l}</div>`).join("")}</div>
+      <div class="right"><div class="km">${km(t.km)} km</div><div class="small muted">${hm(t.started_at)}–${hm(t.ended_at)}</div>
+      ${t.kind !== "private" && secs > 0 ? `<div class="small muted">Kört ${dur(secs)}</div>` : ""}
+      ${t.confirmed ? "" : '<span class="pill">Bekräfta</span>'}</div></div>`;
+  }
+  $("trips").innerHTML = html;
+  $("trips").querySelectorAll(".trip").forEach((el) => el.onclick = () => openEdit(trips.find((t) => t.id === el.dataset.id)));
+}
+
+function fillProj(cid, sel) {
+  const ps = projs.filter((p) => p.customer_id === cid && (!p.closed || p.id === sel));
+  $("eProj").innerHTML = '<option value="">– inget –</option>' + ps.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  $("eProj").value = sel || "";
+}
+function kindVis() { const k = $("eKind").value; show("eCustBox", k === "customer"); show("ePurpBox", k !== "private"); }
+
+function openEdit(t) {
+  editing = t;
+  $("eTitle").textContent = `${dayName(t.started_at)} · ${hm(t.started_at)}–${hm(t.ended_at)} · ${km(t.km)} km`;
+  $("eFacts").textContent = `${t.from_name || "Okänd plats"} → ${t.to_name || "Okänd plats"}` +
+    (t.odo_start != null && t.odo_end != null ? ` · mätare ${km(t.odo_start)}–${km(t.odo_end)}` : "");
+  $("eKind").value = t.kind;
+  $("eCust").innerHTML = '<option value="">– välj kund –</option>' + custs.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("eCust").value = t.customer_id || "";
+  fillProj(t.customer_id, t.project_id);
+  $("eAo").value = t.ao || ""; $("ePurpose").value = t.purpose || ""; $("eVisited").value = t.visited || "";
+  $("eOk").checked = !!t.confirmed; $("eErr").textContent = "";
+  kindVis();
+  $("edit").showModal();
+}
+$("eKind").onchange = kindVis;
+$("eCust").onchange = () => fillProj($("eCust").value, "");
+$("eCancel").onclick = () => $("edit").close();
+$("eSave").onclick = async () => {
+  const k = $("eKind").value, purpose = $("ePurpose").value.trim();
+  if (k !== "private" && !purpose && $("eOk").checked) { $("eErr").textContent = "Skriv ett syfte – Skatteverket kräver det för tjänsteresor."; return; }
+  const upd = {
+    kind: k,
+    customer_id: k === "customer" ? ($("eCust").value || null) : null,
+    project_id: k === "customer" ? ($("eProj").value || null) : null,
+    ao: k === "customer" ? $("eAo").value.trim() : "",
+    purpose: k === "private" ? "" : purpose,
+    visited: k === "private" ? "" : $("eVisited").value.trim(),
+    confirmed: $("eOk").checked,
+  };
+  $("eSave").disabled = true;
+  const { error } = await sb.from("trips").update(upd).eq("id", editing.id);
+  $("eSave").disabled = false;
+  if (error) { $("eErr").textContent = error.message; return; }
+  Object.assign(editing, upd);
+  $("edit").close();
+  renderTrips();
+};
+
+// ------------------------------------------------------------------ per kund
+$("sprev").onclick = () => { sym = new Date(sym.getFullYear(), sym.getMonth() - 1, 1); loadSum(); };
+$("snext").onclick = () => { sym = new Date(sym.getFullYear(), sym.getMonth() + 1, 1); loadSum(); };
+async function loadSum() {
+  $("smonth").textContent = MONTHS[sym.getMonth()].replace(/^./, (c) => c.toUpperCase()) + " " + sym.getFullYear();
+  const { data, error } = await sb.rpc("customer_summary", {
+    c: company, from_ts: sym.toISOString(), to_ts: new Date(sym.getFullYear(), sym.getMonth() + 1, 1).toISOString(),
+  });
+  if (error) { $("sumtable").innerHTML = `<tr><td class="err">${esc(error.message)}</td></tr>`; return; }
+  if (!data || !data.length) { $("sumtable").innerHTML = '<tr><td class="muted">Inga kundresor den här månaden.</td></tr>'; return; }
+  let tk = 0, tm = 0, tn = 0;
+  $("sumtable").innerHTML = "<tr><th>Kund</th><th>Projekt</th><th class='n'>Resor</th><th class='n'>Km</th><th class='n'>Körtid</th></tr>" +
+    data.map((r) => { tk += +r.km; tm += +r.drive_minutes; tn += +r.trips;
+      return `<tr><td>${esc(r.customer)}</td><td>${esc(r.project)}</td><td class="n">${r.trips}</td><td class="n">${km(r.km)}</td><td class="n">${dur(r.drive_minutes * 60)}</td></tr>`; }).join("") +
+    `<tr><th>Totalt</th><th></th><th class="n">${tn}</th><th class="n">${km(tk)}</th><th class="n">${dur(tm * 60)}</th></tr>`;
+}
+
+// ------------------------------------------------------------------ bilar (konsulten)
+async function loadCars() {
+  const { data } = await sb.from("cars").select("id, reg, device_hash").eq("company_id", company).order("reg");
+  $("cars").innerHTML = (data || []).map((c) => `<div class="card"><div style="font-weight:700;font-size:18px">${esc(c.reg)}</div>
+    <div class="small muted">${c.device_hash ? "Skärmen har en nyckel." : "Skärmen har ingen nyckel än – den kan inte ladda upp."}</div>
+    <div style="margin-top:10px"><button data-key="${c.id}">${c.device_hash ? "Ny nyckel till skärmen" : "Skapa nyckel till skärmen"}</button></div>
+    <div id="k-${c.id}"></div></div>`).join("") || '<div class="card muted">Inga bilar.</div>';
+  $("cars").querySelectorAll("[data-key]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.armed !== "1" && b.textContent.startsWith("Ny")) { b.dataset.armed = "1"; b.textContent = "Tryck igen – den gamla nyckeln slutar gälla"; return; }
+    b.disabled = true;
+    const { data: s } = await sb.auth.getSession();
+    const r = await fetch(SUPABASE_URL + "/functions/v1/car-key", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + s.session.access_token, apikey: SUPABASE_KEY },
+      body: JSON.stringify({ car: b.dataset.key }),
+    }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    const box = $("k-" + b.dataset.key);
+    if (!r.ok) { box.innerHTML = `<p class="err">${esc(r.error)}</p>`; b.disabled = false; return; }
+    box.innerHTML = `<p class="small">Skriv in de här i appen under <b>Inställningar → Skärmen i bilen → Molnet</b>. Nyckeln visas bara nu.</p>
+      <label>Bil-id</label><div class="key">${esc(b.dataset.key)}</div><label>Nyckel</label><div class="key">${esc(r.key)}</div>`;
+    b.classList.add("hide");
+  });
+}
+</script>
+</body>
+</html>

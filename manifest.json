@@ -1,0 +1,9 @@
+{
+  "name": "Reseräknare",
+  "short_name": "Reseräknare",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0f141a",
+  "theme_color": "#0f141a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }, { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" }]
+}

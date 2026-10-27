@@ -64,17 +64,37 @@ td.n, th.n { text-align: right; }
 <main>
   <header>
     <div><h1>Reseräknare</h1><div class="sub" id="who"></div></div>
+    <button class="ghost hide" id="pvOpen" style="white-space:nowrap;padding:8px 12px;font-size:14px">Integritet</button>
     <button class="ghost hide" id="logout" style="white-space:nowrap;padding:8px 12px;font-size:14px">Logga ut</button>
   </header>
 
   <!-- Inloggning -->
   <section id="login" class="hide">
     <div class="card">
-      <p>Logga in med din e-postadress. Du får en länk i mejlet – tryck på den så är du inne.</p>
+      <p>Logga in med din e-postadress. Du får en kod i mejlet.</p>
       <label for="email">E-post</label>
       <input id="email" type="email" autocomplete="email" placeholder="namn@foretag.se">
-      <div style="margin-top:14px"><button id="send">Skicka inloggningslänk</button></div>
+      <div style="margin-top:14px"><button id="send">Skicka kod</button></div>
+      <div id="codeBox" class="hide">
+        <label for="code">Koden från mejlet</label>
+        <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" style="font-size:24px;letter-spacing:6px;text-align:center">
+        <div style="margin-top:14px"><button id="verify">Logga in</button></div>
+      </div>
       <p id="loginMsg" class="small"></p>
+    </div>
+  </section>
+
+  <!-- Integritet: läses och godkänns första gången (och när texten ändras) -->
+  <section id="privacy" class="hide">
+    <div class="card" id="privacyText"></div>
+    <div class="card">
+      <label class="row" style="color:var(--text);margin:0;align-items:flex-start;gap:12px">
+        <input type="checkbox" id="pvPlaces" style="width:auto;flex:none;margin-top:3px">
+        <span>Visa start- och slutadress för mina <b>privata</b> resor (frivilligt – annars sparas bara datum, tid och km)</span>
+      </label>
+      <p class="small muted" style="margin-top:12px">Du är inloggad med koden som skickades till <b id="pvEmail"></b>. Ditt godkännande sparas med datum och tid.</p>
+      <p id="pvErr" class="err small"></p>
+      <div class="row"><button class="ghost hide" id="pvClose">Stäng</button><button id="pvOk">Jag har läst och godkänner</button></div>
     </div>
   </section>
 
@@ -177,7 +197,7 @@ const $ = (id) => document.getElementById(id);
 const MONTHS = ["januari","februari","mars","april","maj","juni","juli","augusti","september","oktober","november","december"];
 const COLORS = { customer: "var(--blue)", internal: "var(--purple)", private: "var(--green)" };
 
-let me = null, company = null, role = null, custs = [], projs = [], trips = [], editing = null;
+let companyName = "", me = null, company = null, role = null, custs = [], projs = [], trips = [], editing = null;
 let ym = new Date(); ym = new Date(ym.getFullYear(), ym.getMonth(), 1);
 let sym = new Date(ym);
 
@@ -195,11 +215,20 @@ $("send").onclick = async () => {
   $("send").disabled = true;
   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: SITE } });
   $("send").disabled = false;
+  if (!error) { show("codeBox", true); $("code").focus(); }
   $("loginMsg").className = "small " + (error ? "err" : "ok");
   const rate = error && /rate limit/i.test(error.message);
-  $("loginMsg").textContent = !error ? "Kolla mejlen – tryck på länken. Den gäller en timme."
+  $("loginMsg").textContent = !error ? "Kolla mejlen och skriv in koden. Den gäller en timme."
     : rate ? "För många inloggningsmejl just nu – vänta en stund och försök igen."
     : "Gick inte: " + error.message;
+};
+$("verify").onclick = async () => {
+  const email = $("email").value.trim(), token = $("code").value.replace(/\D/g, "");
+  if (!email || token.length < 6) return;
+  $("verify").disabled = true;
+  const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+  $("verify").disabled = false;
+  if (error) { $("loginMsg").className = "small err"; $("loginMsg").textContent = "Fel eller för gammal kod – skicka en ny."; }
 };
 $("logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
 
@@ -216,6 +245,8 @@ async function start(user) {
   const { data: mem } = await sb.from("members").select("company_id, role, name, companies(name)").eq("user_id", user.id);
   if (!mem || !mem.length) { $("who").textContent = user.email; show("noaccess", true); return; }
   company = mem[0].company_id; role = mem[0].role;
+  companyName = mem[0].companies?.name || "";
+  if (!(await privacyOk())) return;              // godkänn integritetstexten först
   const roleName = { driver: "Förare", consultant: "Konsult", office: "Kontor" }[role];
   $("who").textContent = (mem[0].companies?.name || "") + " · " + (mem[0].name || user.email) + " · " + roleName;
   show("nav", true);
@@ -225,6 +256,55 @@ async function start(user) {
   await loadCusts();
   if (role !== "office") loadTrips();
 }
+
+function route(t, raw) {
+  if (t.kind === "private" && !t.from_name && !t.to_name) return "Adress visas inte (privat)";
+  const r = `${t.from_name || "Okänd plats"} → ${t.to_name || "Okänd plats"}`;
+  return raw ? r : esc(r);
+}
+// ------------------------------------------------------------------ integritet (GDPR)
+const POLICY_VERSION = "2026-10-24";
+function policyHtml() {
+  const c = esc(companyName || "arbetsgivaren");
+  return `<h3 style="margin-top:0">Så hanteras dina uppgifter i körjournalen</h3>
+  <p><b>Ansvarig:</b> ${c} är personuppgiftsansvarig. Frågor ställer du till dem.</p>
+  <p><b>Varför:</b> För att föra körjournal enligt Skatteverkets krav (tjänsteresor och förmånsbil) och för att fakturera kunder rätt.</p>
+  <p><b>Vad som sparas för tjänsteresor:</b> datum, tider, km, mätarställning, start- och slutadress, kund, projekt, arbetsorder och syfte.</p>
+  <p><b>Vad som sparas för privata resor:</b> bara datum, tider och km – Skatteverket kräver att privata mil redovisas, men inte vart du åkte. Adresserna sparas bara om du själv väljer det nedan.</p>
+  <p><b>Sparas aldrig här:</b> GPS-spår och positioner, hastighet och körbeteende, kontakter, samtal och sms. Det som finns i bilens skärm och i förarens telefon stannar där.</p>
+  <p><b>Vem ser vad:</b> du ser dina egna resor. Redovisning/konsult ser företagets resor. Kontoret ser bara summor per kund och projekt – inga enskilda resor.</p>
+  <p><b>Var och hur länge:</b> i EU (Stockholm), så länge som bokförings- och skatteregler kräver, därefter raderas uppgifterna.</p>
+  <p><b>Dina rättigheter:</b> du kan få se vad som finns om dig, få fel rättade och begära radering (så långt lagen tillåter). Du kan också klaga hos Integritetsskyddsmyndigheten (IMY).</p>
+  <p class="small muted">Version ${POLICY_VERSION}. Utkast – granskas innan skarp användning.</p>`;
+}
+async function privacyOk() {
+  const { data } = await sb.from("consents").select("version, private_places").eq("user_id", me.id).eq("company_id", company).eq("version", POLICY_VERSION).maybeSingle();
+  if (data) { $("pvPlaces").checked = !!data.private_places; show("pvOpen", true); return true; }
+  openPrivacy(false);
+  return false;
+}
+function openPrivacy(canClose) {
+  $("privacyText").innerHTML = policyHtml();
+  $("pvEmail").textContent = me.email;
+  $("pvErr").textContent = "";
+  show("pvClose", canClose);
+  $("pvOk").textContent = canClose ? "Spara" : "Jag har läst och godkänner";
+  ["trips", "sum", "cust", "exp", "cars"].forEach((x) => show("tab-" + x, false));
+  show("nav", false);
+  show("privacy", true);
+  window.scrollTo(0, 0);
+}
+$("pvOpen").onclick = () => openPrivacy(true);
+$("pvClose").onclick = () => { show("privacy", false); show("nav", true); tab("trips"); };
+$("pvOk").onclick = async () => {
+  $("pvOk").disabled = true;
+  const { error } = await sb.from("consents").upsert({ user_id: me.id, company_id: company, version: POLICY_VERSION,
+    private_places: $("pvPlaces").checked, accepted_at: new Date().toISOString() });
+  $("pvOk").disabled = false;
+  if (error) { $("pvErr").textContent = error.message; return; }
+  show("privacy", false);
+  location.reload();
+};
 
 // ------------------------------------------------------------------ flikar
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => tab(b.dataset.tab));
@@ -303,7 +383,7 @@ function renderTrips() {
       if (t.purpose) lines.push("Syfte: " + esc(t.purpose));
     }
     if (t.kind !== "private" && !t.purpose) lines.push('<span style="color:var(--amber)">⚠ Syfte saknas</span>');
-    lines.push(`<span class="muted">${esc(t.from_name || "Okänd plats")} → ${esc(t.to_name || "Okänd plats")}</span>`);
+    lines.push(`<span class="muted">${route(t)}</span>`);
     const secs = t.started_at && t.ended_at ? (new Date(t.ended_at) - new Date(t.started_at)) / 1000 : 0;
     html += `<div class="trip" data-id="${t.id}"><div class="bar" style="background:${COLORS[t.kind]}"></div>
       <div class="mid"><div class="h">${esc(head)}</div>${lines.map((l) => `<div class="l">${l}</div>`).join("")}</div>
@@ -325,7 +405,7 @@ function kindVis() { const k = $("eKind").value; show("eCustBox", k === "custome
 function openEdit(t) {
   editing = t;
   $("eTitle").textContent = `${dayName(t.started_at)} · ${hm(t.started_at)}–${hm(t.ended_at)} · ${km(t.km)} km`;
-  $("eFacts").textContent = `${t.from_name || "Okänd plats"} → ${t.to_name || "Okänd plats"}` +
+  $("eFacts").textContent = route(t, true) +
     (t.odo_start != null && t.odo_end != null ? ` · mätare ${km(t.odo_start)}–${km(t.odo_end)}` : "");
   $("eKind").value = t.kind;
   $("eCust").innerHTML = '<option value="">– välj kund –</option>' + custs.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
